@@ -95,6 +95,30 @@ has_command() {
   command -v "$1" &>/dev/null
 }
 
+detect_terminal_backend() {
+  if has_command osascript; then
+    echo "mac"
+  elif has_command wt.exe; then
+    echo "wt"
+  else
+    echo "none"
+  fi
+}
+
+wait_for_tmux_client() {
+  local session="$1"
+  local timeout="${2:-15}"
+  local elapsed=0
+  while (( elapsed < timeout )); do
+    if [[ -n "$(tmux list-clients -t "$session" 2>/dev/null)" ]]; then
+      return 0
+    fi
+    sleep 1
+    elapsed=$(( elapsed + 1 ))
+  done
+  return 1
+}
+
 remove_nonessential_clone_files() {
   if [[ "${WORKING_DIR:t}" == "swarm-forge" ]]; then
     return
@@ -413,7 +437,7 @@ launch_role() {
   echo -e "  ${CYAN}[${display}]${RESET} started in session ${session}"
 }
 
-open_terminal_window() {
+open_terminal_window_mac() {
   local session="$1"
   local title="$2"
   osascript <<EOF
@@ -425,6 +449,24 @@ tell application "Terminal"
   return id of front window
 end tell
 EOF
+}
+
+open_terminal_window_wt() {
+  local session="$1"
+  local title="$2"
+  wt.exe -w new nt --title "$title" \
+    wsl.exe -- bash -lc "cd '$WORKING_DIR' && exec tmux attach-session -t '$session'" \
+    >/dev/null 2>&1 || true
+  # wt.exe doesn't expose a stable handle; emit a non-empty placeholder
+  # so the TSV stays well-formed (zsh `read -r` squashes consecutive tabs).
+  echo "wt:$session"
+}
+
+open_terminal_window() {
+  case "${TERMINAL_BACKEND:-none}" in
+    mac) open_terminal_window_mac "$@" ;;
+    wt)  open_terminal_window_wt  "$@" ;;
+  esac
 }
 
 choose_cleanup_owner() {
@@ -479,25 +521,39 @@ echo -e "${GREEN}Tip: Use $WORKING_DIR/swarmtools/notify-agent.sh <role-or-index
 echo -e "${GREEN}Tip: Reattach manually with 'tmux attach-session -t <session-name>' if needed.${RESET}"
 echo ""
 
-if has_command osascript; then
-  echo -e "Opening separate Terminal windows for each session..."
-  : > "$WINDOW_IDS_FILE"
-  : > "$WINDOW_STATE_FILE"
-  for (( i = 1; i <= ${#ROLES[@]}; i++ )); do
-    window_id="$(open_terminal_window "${SESSIONS[$i]}" "SwarmForge ${DISPLAY_NAMES[$i]}")"
-    echo "$window_id" >> "$WINDOW_IDS_FILE"
-    printf '%s\t%s\t%s\t%s\n' \
-      "$i" \
-      "$window_id" \
-      "${SESSIONS[$i]}" \
-      "SwarmForge ${DISPLAY_NAMES[$i]}" >> "$WINDOW_STATE_FILE"
-  done
-  nohup "$SCRIPT_DIR/swarm-window-watchdog.sh" \
-    "$WINDOW_STATE_FILE" \
-    "$WINDOW_IDS_FILE" \
-    "$CLEANUP_OWNER_INDEX" \
-    "$WORKING_DIR" > "$WINDOW_WATCHDOG_LOG" 2>&1 &
-else
-  echo -e "${YELLOW}osascript not found; attaching current shell to '${SESSIONS[$CLEANUP_OWNER_INDEX]}' instead.${RESET}"
-  tmux attach-session -t "${SESSIONS[$CLEANUP_OWNER_INDEX]}"
-fi
+TERMINAL_BACKEND="$(detect_terminal_backend)"
+
+case "$TERMINAL_BACKEND" in
+  mac|wt)
+    if [[ "$TERMINAL_BACKEND" == "mac" ]]; then
+      echo -e "Opening separate Terminal windows for each session..."
+    else
+      echo -e "Opening separate Windows Terminal windows for each session..."
+    fi
+    : > "$WINDOW_IDS_FILE"
+    : > "$WINDOW_STATE_FILE"
+    for (( i = 1; i <= ${#ROLES[@]}; i++ )); do
+      window_id="$(open_terminal_window "${SESSIONS[$i]}" "SwarmForge ${DISPLAY_NAMES[$i]}")"
+      echo "$window_id" >> "$WINDOW_IDS_FILE"
+      printf '%s\t%s\t%s\t%s\n' \
+        "$i" \
+        "$window_id" \
+        "${SESSIONS[$i]}" \
+        "SwarmForge ${DISPLAY_NAMES[$i]}" >> "$WINDOW_STATE_FILE"
+      if [[ "$TERMINAL_BACKEND" == "wt" ]]; then
+        wait_for_tmux_client "${SESSIONS[$i]}" 15 || \
+          echo -e "${YELLOW}Warning: no client attached to ${SESSIONS[$i]} within 15s.${RESET}"
+      fi
+    done
+    nohup "$SCRIPT_DIR/swarm-window-watchdog.sh" \
+      "$WINDOW_STATE_FILE" \
+      "$WINDOW_IDS_FILE" \
+      "$CLEANUP_OWNER_INDEX" \
+      "$WORKING_DIR" \
+      "$TERMINAL_BACKEND" > "$WINDOW_WATCHDOG_LOG" 2>&1 &
+    ;;
+  *)
+    echo -e "${YELLOW}No terminal backend (osascript or wt.exe) available; attaching current shell to '${SESSIONS[$CLEANUP_OWNER_INDEX]}' instead.${RESET}"
+    tmux attach-session -t "${SESSIONS[$CLEANUP_OWNER_INDEX]}"
+    ;;
+esac

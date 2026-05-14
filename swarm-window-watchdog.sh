@@ -5,11 +5,12 @@ WINDOW_STATE_FILE="$1"
 WINDOW_IDS_FILE="$2"
 CLEANUP_OWNER_INDEX="$3"
 WORKING_DIR="$4"
+TERMINAL_BACKEND="${5:-mac}"
 MISSING_THRESHOLD=3
 
 typeset -A MISSING_COUNTS=()
 
-window_exists() {
+window_exists_mac() {
   local window_id="$1"
   [[ -n "$window_id" ]] || return 1
 
@@ -30,7 +31,21 @@ APPLESCRIPT
   [[ "$result" == "yes" ]]
 }
 
-open_terminal_window() {
+window_exists_wt() {
+  local session="$2"
+  [[ -n "$session" ]] || return 1
+  [[ -n "$(tmux list-clients -t "$session" 2>/dev/null)" ]]
+}
+
+window_exists() {
+  case "$TERMINAL_BACKEND" in
+    mac) window_exists_mac "$@" ;;
+    wt)  window_exists_wt "$@" ;;
+    *)   return 1 ;;
+  esac
+}
+
+open_terminal_window_mac() {
   local session="$1"
   local title="$2"
 
@@ -51,7 +66,23 @@ end run
 APPLESCRIPT
 }
 
-close_terminal_window() {
+open_terminal_window_wt() {
+  local session="$1"
+  local title="$2"
+  wt.exe -w new nt --title "$title" \
+    wsl.exe -- bash -lc "cd '$WORKING_DIR' && exec tmux attach-session -t '$session'" \
+    >/dev/null 2>&1 || true
+  echo "wt:$session"
+}
+
+open_terminal_window() {
+  case "$TERMINAL_BACKEND" in
+    mac) open_terminal_window_mac "$@" ;;
+    wt)  open_terminal_window_wt "$@" ;;
+  esac
+}
+
+close_terminal_window_mac() {
   local window_id="$1"
   [[ -n "$window_id" ]] || return 0
 
@@ -65,6 +96,17 @@ on run argv
   end tell
 end run
 APPLESCRIPT
+}
+
+close_terminal_window_wt() {
+  return 0
+}
+
+close_terminal_window() {
+  case "$TERMINAL_BACKEND" in
+    mac) close_terminal_window_mac "$@" ;;
+    wt)  close_terminal_window_wt "$@" ;;
+  esac
 }
 
 kill_all_sessions() {
@@ -114,7 +156,7 @@ while [[ -f "$WINDOW_STATE_FILE" ]]; do
     exit 0
   fi
 
-  if window_exists "$cleanup_window_id"; then
+  if window_exists "$cleanup_window_id" "$cleanup_session"; then
     MISSING_COUNTS[$CLEANUP_OWNER_INDEX]=0
   else
     MISSING_COUNTS[$CLEANUP_OWNER_INDEX]=$(( ${MISSING_COUNTS[$CLEANUP_OWNER_INDEX]:-0} + 1 ))
@@ -131,7 +173,7 @@ while [[ -f "$WINDOW_STATE_FILE" ]]; do
     [[ "$index" != "$CLEANUP_OWNER_INDEX" ]] || continue
     tmux has-session -t "$session" 2>/dev/null || continue
 
-    if window_exists "$window_id"; then
+    if window_exists "$window_id" "$session"; then
       MISSING_COUNTS[$index]=0
     else
       MISSING_COUNTS[$index]=$(( ${MISSING_COUNTS[$index]:-0} + 1 ))
