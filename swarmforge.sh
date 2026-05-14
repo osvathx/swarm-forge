@@ -432,7 +432,7 @@ launch_role() {
       [[ -n "$session_name" ]] || continue
       launch_cmd+=" '$session_name'"
     done
-    launch_cmd+=" >/dev/null 2>&1 &!; exit \$exit_code"
+    launch_cmd+=" >/dev/null 2>&1 & disown; exit \$exit_code"
   fi
 
   tmux send-keys -t "${session}:${display}.0" "$launch_cmd" Enter
