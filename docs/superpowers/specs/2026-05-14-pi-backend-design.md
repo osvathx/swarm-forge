@@ -63,7 +63,7 @@ The cleanup-window wrapper (the `if [[ "$index" -eq "${CLEANUP_OWNER_INDEX}" ]]`
 
 ## Verification
 
-After implementation:
+Verification is **manual**. No automated tests are added to the repository — the user runs these checks by hand against a real working directory after implementation:
 
 1. Run `swarmforge.sh` against a working directory whose `swarmforge.conf` includes at least one role with `pi` as the agent. Confirm the Terminal window opens, pi starts, and the agent receives and acts on the bootstrap prompt (i.e., it reads the constitution and role prompt).
 2. Run `swarmforge.sh` against a `swarmforge.conf` containing an intentionally misspelled agent name (e.g., `pii`). Confirm the validation error still fires — regression check that adding `pi` to the case statement did not accidentally widen the allowlist.
