@@ -39,9 +39,9 @@ window_exists_wt() {
 
 window_exists() {
   case "$TERMINAL_BACKEND" in
-    mac) window_exists_mac "$@" ;;
-    wt)  window_exists_wt "$@" ;;
-    *)   return 1 ;;
+    mac)        window_exists_mac "$@" ;;
+    wt|gnome)   window_exists_wt "$@" ;;
+    *)          return 1 ;;
   esac
 }
 
@@ -75,10 +75,20 @@ open_terminal_window_wt() {
   echo "wt:$session"
 }
 
+open_terminal_window_gnome() {
+  local session="$1"
+  local title="$2"
+  gnome-terminal --window --title="$title" -- \
+    bash -lc "cd '$WORKING_DIR' && exec tmux attach-session -t '$session'" \
+    >/dev/null 2>&1 || true
+  echo "gnome:$session"
+}
+
 open_terminal_window() {
   case "$TERMINAL_BACKEND" in
-    mac) open_terminal_window_mac "$@" ;;
-    wt)  open_terminal_window_wt "$@" ;;
+    mac)   open_terminal_window_mac   "$@" ;;
+    wt)    open_terminal_window_wt    "$@" ;;
+    gnome) open_terminal_window_gnome "$@" ;;
   esac
 }
 
@@ -99,13 +109,15 @@ APPLESCRIPT
 }
 
 close_terminal_window_wt() {
+  # wt and gnome-terminal windows close themselves when the attached tmux
+  # client exits, which happens once the tmux session is killed.
   return 0
 }
 
 close_terminal_window() {
   case "$TERMINAL_BACKEND" in
-    mac) close_terminal_window_mac "$@" ;;
-    wt)  close_terminal_window_wt "$@" ;;
+    mac)        close_terminal_window_mac "$@" ;;
+    wt|gnome)   close_terminal_window_wt "$@" ;;
   esac
 }
 

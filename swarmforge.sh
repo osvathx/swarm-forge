@@ -100,6 +100,8 @@ detect_terminal_backend() {
     echo "mac"
   elif has_command wt.exe; then
     echo "wt"
+  elif has_command gnome-terminal; then
+    echo "gnome"
   else
     echo "none"
   fi
@@ -462,10 +464,20 @@ open_terminal_window_wt() {
   echo "wt:$session"
 }
 
+open_terminal_window_gnome() {
+  local session="$1"
+  local title="$2"
+  gnome-terminal --window --title="$title" -- \
+    bash -lc "cd '$WORKING_DIR' && exec tmux attach-session -t '$session'" \
+    >/dev/null 2>&1 || true
+  echo "gnome:$session"
+}
+
 open_terminal_window() {
   case "${TERMINAL_BACKEND:-none}" in
-    mac) open_terminal_window_mac "$@" ;;
-    wt)  open_terminal_window_wt  "$@" ;;
+    mac)   open_terminal_window_mac   "$@" ;;
+    wt)    open_terminal_window_wt    "$@" ;;
+    gnome) open_terminal_window_gnome "$@" ;;
   esac
 }
 
@@ -524,12 +536,12 @@ echo ""
 TERMINAL_BACKEND="$(detect_terminal_backend)"
 
 case "$TERMINAL_BACKEND" in
-  mac|wt)
-    if [[ "$TERMINAL_BACKEND" == "mac" ]]; then
-      echo -e "Opening separate Terminal windows for each session..."
-    else
-      echo -e "Opening separate Windows Terminal windows for each session..."
-    fi
+  mac|wt|gnome)
+    case "$TERMINAL_BACKEND" in
+      mac)   echo -e "Opening separate Terminal windows for each session..." ;;
+      wt)    echo -e "Opening separate Windows Terminal windows for each session..." ;;
+      gnome) echo -e "Opening separate gnome-terminal windows for each session..." ;;
+    esac
     : > "$WINDOW_IDS_FILE"
     : > "$WINDOW_STATE_FILE"
     for (( i = 1; i <= ${#ROLES[@]}; i++ )); do
@@ -540,7 +552,7 @@ case "$TERMINAL_BACKEND" in
         "$window_id" \
         "${SESSIONS[$i]}" \
         "SwarmForge ${DISPLAY_NAMES[$i]}" >> "$WINDOW_STATE_FILE"
-      if [[ "$TERMINAL_BACKEND" == "wt" ]]; then
+      if [[ "$TERMINAL_BACKEND" == "wt" || "$TERMINAL_BACKEND" == "gnome" ]]; then
         wait_for_tmux_client "${SESSIONS[$i]}" 15 || \
           echo -e "${YELLOW}Warning: no client attached to ${SESSIONS[$i]} within 15s.${RESET}"
       fi
@@ -553,7 +565,7 @@ case "$TERMINAL_BACKEND" in
       "$TERMINAL_BACKEND" > "$WINDOW_WATCHDOG_LOG" 2>&1 &
     ;;
   *)
-    echo -e "${YELLOW}No terminal backend (osascript or wt.exe) available; attaching current shell to '${SESSIONS[$CLEANUP_OWNER_INDEX]}' instead.${RESET}"
+    echo -e "${YELLOW}No terminal backend (osascript, wt.exe, or gnome-terminal) available; attaching current shell to '${SESSIONS[$CLEANUP_OWNER_INDEX]}' instead.${RESET}"
     tmux attach-session -t "${SESSIONS[$CLEANUP_OWNER_INDEX]}"
     ;;
 esac
